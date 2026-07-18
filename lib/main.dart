@@ -1,23 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'notification_service.dart';
 import 'signup_screen.dart';
 import 'login_screen.dart';
 import 'localization.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
-/// The main entry point of the application.
-///
-/// Initializes notifications and runs the app.
+import 'server_health_service.dart';
+import 'server_offline_overlay.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  ); // uses your firebase_options.dart
+  
+  // Start server health check
+  ServerHealthService().startHealthCheck();
+  
   runApp(const MyApp());
 }
 
-/// The root widget of the application with theme handling.
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -54,27 +51,80 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Khuje Nao',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1565C0),
+          brightness: Brightness.light,
+        ),
         useMaterial3: true,
-        brightness: Brightness.light,
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+        ),
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          filled: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        ),
       ),
       darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.dark),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1565C0),
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
-        brightness: Brightness.dark,
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+        ),
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          filled: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        ),
       ),
       themeMode: _themeMode,
-      home: HomeScreen(onToggleTheme: _toggleTheme, themeMode: _themeMode),
+      home: ServerOfflineOverlay(
+        child: HomeScreen(onToggleTheme: _toggleTheme, themeMode: _themeMode),
+      ),
     );
   }
 }
 
-/// The home screen of the app, where users can navigate to login or signup pages.
-///
-/// This widget also allows users to toggle between English and Bengali languages.
 class HomeScreen extends StatefulWidget {
-  /// Constructor for [HomeScreen].
   const HomeScreen({super.key, required this.onToggleTheme, required this.themeMode});
 
   final Future<void> Function() onToggleTheme;
@@ -85,11 +135,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> {
-  /// Instance of [FlutterSecureStorage] to persist language preferences securely.
   final FlutterSecureStorage STORAGE = const FlutterSecureStorage();
-
-  /// Stores the current language code (`en` for English, `bd` for Bengali).
-  String language = 'en'; // Default language
+  String language = 'en';
 
   @override
   void initState() {
@@ -97,9 +144,6 @@ class HomeScreenState extends State<HomeScreen> {
     loadLanguage();
   }
 
-  /// Loads the user's preferred language from secure storage.
-  ///
-  /// If no language is found, defaults to English (`en`).
   Future<void> loadLanguage() async {
     String? storedLanguage = await STORAGE.read(key: 'language');
     setState(() {
@@ -107,7 +151,6 @@ class HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// Toggles the language between English (`en`) and Bengali (`bd`) and updates secure storage.
   Future<void> toggleLanguage() async {
     String newLanguage = language == 'en' ? 'bd' : 'en';
     await STORAGE.write(key: 'language', value: newLanguage);
@@ -118,47 +161,115 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Welcome to Khuje Nao'),
+        title: const Text('Khuje Nao'),
         actions: [
           IconButton(
             tooltip: 'Toggle theme',
             onPressed: widget.onToggleTheme,
             icon: Icon(widget.themeMode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode),
           ),
-          ElevatedButton(
+          IconButton(
+            tooltip: 'Toggle language',
             onPressed: toggleLanguage,
-            child: Text(
-              language == 'en' ? 'বাংলা' : 'English',
-              style: const TextStyle(color: Colors.black),
-            ),
+            icon: const Icon(Icons.language),
           ),
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const SignupScreen()),
-                );
-              },
-              child: Text(AppLocalization.getString(language, 'signup')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.search,
+                    size: 64,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  language == 'en' ? 'Find Your Lost Items' : 'আপনার হারানো জিনিস খুঁজুন',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  language == 'en'
+                      ? 'Report and find lost items at North South University'
+                      : 'নর্থ সাউথ ইউনিভার্সিটিতে হারানো জিনিস রিপোর্ট এবং খুঁজুন',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const SignupScreen()),
+                      );
+                    },
+                    icon: const Icon(Icons.person_add),
+                    label: Text(
+                      AppLocalization.getString(language, 'signup'),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const LoginScreen()),
+                      );
+                    },
+                    icon: const Icon(Icons.login),
+                    label: Text(
+                      AppLocalization.getString(language, 'login'),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  language == 'en' ? 'Powered by NSU Students' : 'এনএসইউ ছাত্রদের দ্বারা পরিচালিত',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
-              },
-              child: Text(AppLocalization.getString(language, 'login')),
-            ),
-          ],
+          ),
         ),
       ),
     );
