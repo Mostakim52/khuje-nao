@@ -1,43 +1,27 @@
-import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_chat_types/flutter_chat_types.dart' as types;
+import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
-import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:khuje_nao/api_config.dart';
 import 'package:khuje_nao/api_service.dart';
-import 'dart:async'; //# For periodic updates
 
-/// The `ChatPage` widget provides the interface for real-time communication between users.
-/// It handles message sending, message retrieval, and periodic refresh of messages.
 class ChatPage extends StatefulWidget {
+  const ChatPage({super.key});
+
   @override
   State<ChatPage> createState() => ChatPageState();
 }
 
 class ChatPageState extends State<ChatPage> {
-  /// List of messages to display in the chat.
-  List<types.Message> messages = [];
-
-  /// Secure storage for user data (e.g., email, receiver email).
+  final InMemoryChatController _chatController = InMemoryChatController();
   final STORAGE = const FlutterSecureStorage();
   final ApiService api_service = ApiService();
-
-  /// The current user.
-  late types.User user;
-
-  /// The email of the person being messaged (receiver).
+  String currentUserId = '';
   String current_receiver = '';
-
-  /// Receiver's user details (name, email, NSU ID, phone)
   Map<String, dynamic>? receiver_details;
-
-  /// Loading indicator for the page.
   bool is_loading = true;
-
-  /// Timer to periodically refresh messages.
-  Timer? message_timer;
+  bool _isConnected = true;
 
   @override
   void initState() {
@@ -47,14 +31,12 @@ class ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    message_timer?.cancel(); //# Cancel the timer when the widget is disposed
+    api_service.offNewMessage();
+    api_service.disconnectSocket();
+    _chatController.dispose();
     super.dispose();
   }
 
-  /// Initializes the user and loads messages.
-  ///
-  /// This method retrieves the user and receiver email from secure storage,
-  /// sets up the user information, and starts the periodic message refresh.
   Future<void> initializeUser() async {
     try {
       final email = await STORAGE.read(key: "email");
@@ -62,31 +44,34 @@ class ChatPageState extends State<ChatPage> {
 
       if (email != null && receiverEmail != null) {
         setState(() {
-          user = types.User(
-            id: email,
-            firstName: email.split('@').first,
-          );
+          currentUserId = email;
           current_receiver = receiverEmail;
           is_loading = false;
         });
 
-        // Fetch receiver's user details
         await fetchReceiverDetails();
+        await loadMessages();
+        setupSocketListener();
+        
+        // Connect socket and join room
+        api_service.connectSocket();
+        api_service.joinChatRoom(currentUserId, current_receiver);
 
-        loadMessages(); // Initial message load
-        startMessageRefresh(); // Start periodic refresh
+        await api_service.markMessagesRead(
+          authorId: current_receiver,
+          receiverId: currentUserId,
+        );
       } else {
         throw Exception("User or receiver email not found in storage.");
       }
     } catch (e) {
-      print("Error initializing chat: $e");
+      debugPrint("Error initializing chat: $e");
       setState(() {
         is_loading = false;
       });
     }
   }
 
-  /// Fetches the receiver's user details (name, email, NSU ID, phone)
   Future<void> fetchReceiverDetails() async {
     try {
       final details = await api_service.getUserByEmail(current_receiver);
@@ -94,108 +79,83 @@ class ChatPageState extends State<ChatPage> {
         receiver_details = details;
       });
     } catch (e) {
-      print('Error fetching receiver details: $e');
+      debugPrint('Error fetching receiver details: $e');
     }
   }
 
-  /// Starts periodic message refresh every 5 seconds.
-  ///
-  /// This method uses a timer to automatically refresh the messages at a regular interval.
-  void startMessageRefresh() {
-    message_timer = Timer.periodic(Duration(seconds: 5), (timer) {
-      loadMessages();
-    });
-  }
-
-  /// Adds a new message to the chat UI.
-  ///
-  /// [message] The message object that will be inserted at the top of the messages list.
-  void addMessage(types.Message message) {
-    setState(() {
-      messages.insert(0, message);
-    });
-  }
-
-  /// Handles the send button press by sending the message to the server.
-  ///
-  /// [message] The message content (partial text) to be sent.
-  void handleSendPressed(types.PartialText message) async {
-    final textMessage = types.TextMessage(
-      author: user,
-      createdAt: DateTime.now().millisecondsSinceEpoch,
-      id: const Uuid().v4(),
-      text: message.text,
-    );
-
-    addMessage(textMessage);
-    await sendMessageToServer(textMessage);
-  }
-
-  /// Sends the message to the server.
-  ///
-  /// [message] The message to be sent to the server.
-  Future<void> sendMessageToServer(types.TextMessage message) async {
-    try {
-      final response = await http.post(
-        Uri.parse(ApiConfig.getUrl(ApiConfig.sendMessage)),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'text': message.text,
-          'author_id': message.author.id,
-          'receiver_id': current_receiver,
-          'created_at': message.createdAt,
-        }),
-      );
-
-      if (response.statusCode != 201) {
-        throw Exception('Failed to send message');
+  void setupSocketListener() {
+    api_service.onNewMessage((data) {
+      if (mounted) {
+        final message = Message.text(
+          id: data['id'] ?? '',
+          authorId: data['author_id'] ?? '',
+          createdAt: DateTime.parse(data['created_at']),
+          text: data['text'] ?? '',
+        );
+        
+        final existingIds = _chatController.messages.map((m) => m.id).toSet();
+        if (!existingIds.contains(message.id)) {
+          _chatController.insertMessage(message);
+        }
       }
-    } catch (e) {
-      print('Error sending message: $e');
-    }
+    });
   }
 
-  /// Loads messages from the server based on the current user and receiver.
   Future<void> loadMessages() async {
     try {
-      final response = await http.post(
-        Uri.parse(ApiConfig.getUrl(ApiConfig.getMessages)),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'author_id': user.id,
-          'receiver_id': current_receiver,
-        }),
+      final messages = await api_service.getMessages(
+        authorId: currentUserId,
+        receiverId: current_receiver,
       );
 
-      if (response.statusCode == 200) {
-        final List<dynamic> responseData = jsonDecode(response.body);
-        final loaded_messages = responseData.map((message) {
-          return types.TextMessage(
-            id: message['_id'] ?? '',
-            author: types.User(id: message['author_id']),
-            createdAt: message['created_at'] ?? DateTime.now().millisecondsSinceEpoch,
-            text: message['text'] ?? '',
-          );
-        }).toList();
+      final loadedMessages = messages.map((msg) {
+        return Message.text(
+          id: msg['_id'] ?? msg['id'] ?? '',
+          authorId: msg['author_id'] ?? '',
+          createdAt: DateTime.parse(msg['created_at']),
+          text: msg['text'] ?? '',
+        );
+      }).toList();
 
-        setState(() {
-          messages = loaded_messages;
-        });
-      } else {
-        throw Exception('Failed to load messages');
-      }
+      loadedMessages.sort((a, b) {
+        final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bTime.compareTo(aTime);
+      });
+
+      await _chatController.setMessages(loadedMessages, animated: false);
     } catch (e) {
-      print('Error loading messages: $e');
+      debugPrint('Error loading messages: $e');
     }
   }
 
-  /// Shows a dialog with receiver's user details
+  void _handleSendPressed(String text) async {
+    final messageId = const Uuid().v4();
+    final now = DateTime.now();
+
+    final message = Message.text(
+      id: messageId,
+      authorId: currentUserId,
+      createdAt: now,
+      text: text,
+    );
+
+    _chatController.insertMessage(message);
+    
+    // Send via SocketIO
+    api_service.sendMessageViaSocket(
+      authorId: currentUserId,
+      receiverId: current_receiver,
+      text: text,
+    );
+  }
+
   void showReceiverDetailsDialog() {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('Contact Information'),
+          title: const Text('Contact Information'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -208,7 +168,7 @@ class ChatPageState extends State<ChatPage> {
                       child: Row(
                         children: [
                           Icon(Icons.person, size: 20, color: Colors.grey[600]),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(child: Text('Name: ${receiver_details!['name']}')),
                         ],
                       ),
@@ -219,7 +179,7 @@ class ChatPageState extends State<ChatPage> {
                       child: Row(
                         children: [
                           Icon(Icons.email, size: 20, color: Colors.grey[600]),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(child: Text('Email: ${receiver_details!['email']}')),
                         ],
                       ),
@@ -230,7 +190,7 @@ class ChatPageState extends State<ChatPage> {
                       child: Row(
                         children: [
                           Icon(Icons.badge, size: 20, color: Colors.grey[600]),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(child: Text('NSU ID: ${receiver_details!['nsu_id']}')),
                         ],
                       ),
@@ -241,20 +201,20 @@ class ChatPageState extends State<ChatPage> {
                       child: Row(
                         children: [
                           Icon(Icons.phone, size: 20, color: Colors.grey[600]),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(child: Text('Phone: ${receiver_details!['phone_number']}')),
                         ],
                       ),
                     ),
                 ] else
-                  Text('Loading contact information...'),
+                  const Text('Loading contact information...'),
               ],
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Close'),
+              child: const Text('Close'),
             ),
           ],
         );
@@ -276,7 +236,7 @@ class ChatPageState extends State<ChatPage> {
         title: Text('Chat with ${receiver_details?['name'] ?? current_receiver.split('@').first}'),
         actions: [
           IconButton(
-            icon: Icon(Icons.info_outline),
+            icon: const Icon(Icons.info_outline),
             onPressed: showReceiverDetailsDialog,
             tooltip: 'View contact information',
           ),
@@ -284,43 +244,69 @@ class ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
-          // Display receiver details at the top
+          if (!_isConnected)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              color: Colors.orange,
+              child: const Text(
+                'Offline - messages will send when connected',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
           if (receiver_details != null)
             Container(
               width: double.infinity,
-              padding: EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
               color: Colors.blue.shade50,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Contact Information',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Wrap(
                     spacing: 16,
                     runSpacing: 4,
                     children: [
                       if (receiver_details!['nsu_id'] != null)
-                        Text('NSU ID: ${receiver_details!['nsu_id']}', style: TextStyle(fontSize: 12)),
+                        Text('NSU ID: ${receiver_details!['nsu_id']}', style: const TextStyle(fontSize: 12)),
                       if (receiver_details!['phone_number'] != null)
-                        Text('Phone: ${receiver_details!['phone_number']}', style: TextStyle(fontSize: 12)),
+                        Text('Phone: ${receiver_details!['phone_number']}', style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                 ],
               ),
             ),
-          // Chat interface
           Expanded(
             child: Chat(
-              messages: messages,
-              onSendPressed: handleSendPressed,
-              user: user,
+              currentUserId: currentUserId,
+              chatController: _chatController,
+              resolveUser: _resolveUser,
+              onMessageSend: _handleSendPressed,
             ),
           ),
         ],
       ),
     );
+  }
+
+  Future<User?> _resolveUser(String userId) async {
+    if (userId == currentUserId) {
+      return User(
+        id: currentUserId,
+        name: currentUserId.split('@').first,
+      );
+    }
+    if (userId == current_receiver) {
+      return User(
+        id: current_receiver,
+        name: receiver_details?['name'] ?? current_receiver.split('@').first,
+      );
+    }
+    return null;
   }
 }
