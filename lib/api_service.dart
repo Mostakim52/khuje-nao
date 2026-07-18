@@ -220,7 +220,7 @@ class ApiService {
     return jsonDecode(response.body);
   }
   
-  Future<List<dynamic>> searchLostItems(String query) async {
+  Future<List<dynamic>> searchLostItems({required String query}) async {
     final response = await _get('${ApiConfig.searchLostItems}?q=$query');
     return jsonDecode(response.body);
   }
@@ -228,5 +228,27 @@ class ApiService {
   Future<List<dynamic>> getActivityFeed() async {
     final response = await _get(ApiConfig.activityFeed);
     return jsonDecode(response.body);
+  }
+  
+  Future<bool> markItemAsFound(String itemId) async {
+    final response = await _post(ApiConfig.getMarkFoundUrl(itemId));
+    return response.statusCode == 200;
+  }
+  
+  Future<bool> reportLostItem({
+    required String description,
+    required String location,
+    required String imagePath,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse(ApiConfig.getUrl(ApiConfig.lostItems)),
+    );
+    request.fields['description'] = description;
+    request.fields['location'] = location;
+    request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+    
+    final streamedResponse = await request.send();
+    return streamedResponse.statusCode == 201;
   }
 }

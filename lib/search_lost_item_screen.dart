@@ -75,7 +75,7 @@ class SearchLostItemsScreenState extends State<SearchLostItemsScreen> {
       final results = await ApiService().searchLostItems(query: query);
 
       setState(() {
-        search_results = results;
+        search_results = results.cast<Map<String, dynamic>>();
       });
     } catch (e) {
       print('Error searching items: $e');

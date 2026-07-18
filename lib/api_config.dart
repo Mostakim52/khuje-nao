@@ -41,4 +41,12 @@ class ApiConfig {
   static String getSocketUrl() {
     return socketUrl;
   }
+  
+  static String getApproveUrl(String itemId) {
+    return '$baseUrl/lost-items/$itemId/approve';
+  }
+  
+  static String getMarkFoundUrl(String itemId) {
+    return '$baseUrl/lost-items/$itemId/found';
+  }
 }
