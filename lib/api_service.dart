@@ -1,265 +1,211 @@
-import 'dart:io';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:khuje_nao/api_config.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'api_config.dart';
 
-/// A service class to handle API calls for user authentication, lost items, and email-related tasks.
 class ApiService {
-  /// Instance of [FlutterSecureStorage] to store secure data like tokens.
-  final STORAGE = const FlutterSecureStorage();
-
-  Map<String, String> _headers(String token) => {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer $token',
-  };
-
-  /// Signs up a new user by sending their details to the backend.
-  ///
-  /// Returns:
-  /// - `0` if the signup is successful.
-  /// - `-1` to `-5` for input validation errors (name, email, password, NSU ID, phone number).
-  /// - `-6` if signup fails due to server issues.
-  Future<int> signup(String name, String email, String password, int nsu_id, String phone_number) async {
-    // Input validation for various fields
-    final nameRegExp = RegExp(r"^[a-zA-Z\s]{2,50}$");
-    if (!nameRegExp.hasMatch(name)) {
-      return -1;
-    }
-    final emailRegExp = RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
-    if (!emailRegExp.hasMatch(email)) {
-      return -2;
-    }
-    final passwordRegExp = RegExp(r"^(?=.*[A-Z])(?=.*\d).{8,}$");
-    if (!passwordRegExp.hasMatch(password)) {
-      return -3;
-    }
-    final nsuIdRegExp = RegExp(r"^\d{2}[1-3]\d{4}$");
-    if (!nsuIdRegExp.hasMatch(nsu_id.toString())) {
-      return -4;
-    }
-    final phoneRegExp = RegExp(r"^(?:\+88|88)?(01[3-9]\d{8})$");
-    if (!phoneRegExp.hasMatch(phone_number)) {
-      return -5;
-    }
-
-    try {
-      // Sending signup request to the server
-      final response = await http.post(
-        Uri.parse(ApiConfig.getUrl(ApiConfig.signup)),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "name": name,
-          "email": email,
-          "phone_number": phone_number,
-          "password": password,
-          "nsu_id": nsu_id.toString()
-        }),
-      );
-
-      if (response.statusCode == 201) {
-        print("User registered successfully!");
-        return 0;
-      } else {
-        print("Signup failed: ${response.body}");
-        return -6;
-      }
-    } catch (e) {
-      print("Signup failed: $e");
-      return -6;
-    }
-  }
-
-  /// Logs in a user with their email and password.
-  ///
-  /// Returns:
-  /// - `0` if login is successful.
-  /// - `-1` or `-2` for validation errors in email or password.
-  /// - `-9` for any other login failure.
-  Future<int> login(String email, String password) async {
-    final emailRegExp = RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$");
-    if (!emailRegExp.hasMatch(email)) {
-      return -1;
-    }
-    final passwordRegExp = RegExp(r"^(?=.*[A-Z])(?=.*\d).{8,}$");
-    if (!passwordRegExp.hasMatch(password)) {
-      return -2;
-    }
-
-    try {
-      final response = await http.post(
-        Uri.parse(ApiConfig.getUrl(ApiConfig.login)),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "email": email,
-          "password": password,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        await STORAGE.write(key: "email", value: data["email"]);
-        print("Login successful! Token stored.");
-        return 0;
-      } else {
-        print("Login failed: ${response.body}");
-        return -9;
-      }
-    } catch (e) {
-      print("Login failed: $e");
-      return -9;
-    }
-  }
-
-  /// Logs out the user by deleting their stored token.
-  Future<void> logout() async {
-    await STORAGE.delete(key: "jwt_token");
-    print("User logged out!");
-  }
-
-  /// Reports a lost item by sending its description, location, and image to the backend.
-  ///
-  /// Returns `true` if the item is reported successfully, otherwise `false`.
-  Future<bool> reportLostItem({
-    required String description,
-    required String location,
-    required String imagePath,
-  }) async {
-    try {
-      String? email = await STORAGE.read(key: "email");
-      if (email == null || email.isEmpty) {
-        print('Email not found.');
-        return false;
-      }
-      var request = http.MultipartRequest('POST', Uri.parse(ApiConfig.getUrl(ApiConfig.lostItems)));
-      request.fields['description'] = description;
-      request.fields['location'] = location;
-      request.fields['reported_by'] = email;
-      request.files.add(await http.MultipartFile.fromPath('image', imagePath));
-
-      final response = await request.send();
-      return response.statusCode == 201;
-    } catch (e) {
-      print('Error reporting lost item: $e');
-      return false;
-    }
-  }
-
-  /// Marks an item as found by sending a request to the backend.
-  Future<void> markItemAsFound(String itemId) async {
-    try {
-      final response = await http.post(
-        Uri.parse(ApiConfig.getFoundUrl(itemId)),
-      );
-
-      if (response.statusCode == 200) {
-        print('Item marked as found successfully!');
-      } else {
-        print('Failed to mark item as found: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-  }
-
-  // Removed email broadcast feature
-
-  /// Searches for lost items based on a query string.
-  ///
-  /// Returns a list of matching items.
-  Future<List<Map<String, dynamic>>> searchLostItems({
-    required String query,
-  }) async {
-    try {
-      final response = await http.get(Uri.parse('${ApiConfig.getUrl(ApiConfig.searchLostItems)}?query=$query'));
-      if (response.statusCode == 200) {
-        return List<Map<String, dynamic>>.from(jsonDecode(response.body));
-      } else {
-        print('Search failed: ${response.body}');
-        return [];
-      }
-    } catch (e) {
-      print('Error searching lost items: $e');
-      return [];
-    }
-  }
-
-  // OTP endpoints removed
-
-  /// Verifies a Firebase Google ID token with the backend for secure login.
-  Future<bool> firebaseGoogleLogin(String idToken) async {
-    final response = await http.post(
-      Uri.parse(ApiConfig.getUrl(ApiConfig.firebaseGoogleLogin)),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'idToken': idToken}),
+  final _storage = const FlutterSecureStorage();
+  IO.Socket? _socket;
+  
+  // ========== Socket.IO Methods ==========
+  
+  void connectSocket() {
+    if (_socket != null && _socket!.connected) return;
+    
+    _socket = IO.io(
+      ApiConfig.getSocketUrl(),
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .enableAutoConnect()
+          .enableReconnection()
+          .setReconnectionDelay(1000)
+          .build(),
     );
-    if (response.statusCode == 200) {
-      // Optionally: store any user/session info returned
-      return true;
-    }
-    return false;
+    
+    _socket!.onConnect((_) {
+      print('Socket connected');
+    });
+    
+    _socket!.onDisconnect((_) {
+      print('Socket disconnected');
+    });
+    
+    _socket!.on('new_message', (data) {
+      print('New message: $data');
+    });
   }
-
-  // Save or update profile fields server-side tied to Firebase uid
-  Future<bool> completeProfileWithToken({
-    required String token,
+  
+  void disconnectSocket() {
+    _socket?.disconnect();
+    _socket?.dispose();
+    _socket = null;
+  }
+  
+  void joinChatRoom(String user1, String user2) {
+    _socket?.emit('join_chat', {'user1': user1, 'user2': user2});
+  }
+  
+  void sendMessageViaSocket({
+    required String authorId,
+    required String receiverId,
+    required String text,
+  }) {
+    _socket?.emit('send_message', {
+      'author_id': authorId,
+      'receiver_id': receiverId,
+      'text': text,
+    });
+  }
+  
+  void onNewMessage(Function(dynamic) callback) {
+    _socket?.on('new_message', callback);
+  }
+  
+  void offNewMessage() {
+    _socket?.off('new_message');
+  }
+  
+  // ========== HTTP Methods ==========
+  
+  Future<Map<String, String>> _getHeaders() async {
+    final token = await _storage.read(key: 'access_token');
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
+  
+  Future<http.Response> _get(String endpoint) async {
+    final headers = await _getHeaders();
+    return http.get(
+      Uri.parse(ApiConfig.getUrl(endpoint)),
+      headers: headers,
+    );
+  }
+  
+  Future<http.Response> _post(String endpoint, {Map<String, dynamic>? body}) async {
+    final headers = await _getHeaders();
+    return http.post(
+      Uri.parse(ApiConfig.getUrl(endpoint)),
+      headers: headers,
+      body: body != null ? jsonEncode(body) : null,
+    );
+  }
+  
+  // ========== Auth Methods ==========
+  
+  Future<Map<String, dynamic>> signup({
+    required String email,
+    required String password,
     required String name,
-    required int nsuId,
-    required String phone,
   }) async {
-    final res = await http.post(
-      Uri.parse(ApiConfig.getUrl(ApiConfig.profile)),
-      headers: _headers(token),
-      body: jsonEncode({'name': name, 'nsu_id': nsuId, 'phone': phone}),
-    );
-    return res.statusCode == 200 || res.statusCode == 201;
+    final response = await _post(ApiConfig.signup, body: {
+      'email': email,
+      'password': password,
+      'name': name,
+    });
+    return jsonDecode(response.body);
   }
-
-  // Optional: fetch profile to prefill name/NSU if it already exists
-  Future<Map<String, dynamic>?> getProfile(String token) async {
-    final res = await http.get(
-      Uri.parse(ApiConfig.getUrl(ApiConfig.profile)),
-      headers: _headers(token),
-    );
-    if (res.statusCode == 200) return jsonDecode(res.body);
-    return null;
+  
+  Future<Map<String, dynamic>> login({
+    required String email,
+    required String password,
+  }) async {
+    final response = await _post(ApiConfig.login, body: {
+      'email': email,
+      'password': password,
+    });
+    
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      await _storage.write(key: 'access_token', value: data['session']['access_token']);
+      await _storage.write(key: 'refresh_token', value: data['session']['refresh_token']);
+      await _storage.write(key: 'email', value: data['user']['email']);
+      return data;
+    }
+    
+    return jsonDecode(response.body);
   }
-
-  /// Check if a user exists by email.
-  /// Returns true if user exists, false otherwise.
+  
+  Future<Map<String, dynamic>> firebaseGoogleLogin(String accessToken) async {
+    final response = await _post(ApiConfig.firebaseGoogleLogin, body: {
+      'access_token': accessToken,
+    });
+    
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      await _storage.write(key: 'access_token', value: data['session']['access_token']);
+      await _storage.write(key: 'refresh_token', value: data['session']['refresh_token']);
+      await _storage.write(key: 'email', value: data['user']['email']);
+      return data;
+    }
+    
+    return jsonDecode(response.body);
+  }
+  
+  Future<void> logout() async {
+    await _storage.delete(key: 'access_token');
+    await _storage.delete(key: 'refresh_token');
+    await _storage.delete(key: 'email');
+    disconnectSocket();
+  }
+  
+  // ========== User Methods ==========
+  
+  Future<Map<String, dynamic>> getUserByEmail(String email) async {
+    final response = await _get('${ApiConfig.userByEmail}/$email');
+    return jsonDecode(response.body);
+  }
+  
   Future<bool> checkUserExists(String email) async {
-    try {
-      final response = await http.post(
-        Uri.parse(ApiConfig.getUrl(ApiConfig.checkUserExists)),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
-      );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['exists'] == true;
-      }
-      return false;
-    } catch (e) {
-      print('Error checking user existence: $e');
-      return false;
-    }
+    final response = await _post(ApiConfig.checkUserExists, body: {'email': email});
+    final data = jsonDecode(response.body);
+    return data['exists'] ?? false;
   }
-
-  /// Get user details by email (for chat display).
-  /// Returns user profile or null if not found.
-  Future<Map<String, dynamic>?> getUserByEmail(String email) async {
-    try {
-      final response = await http.get(
-        Uri.parse(ApiConfig.getUserByEmailUrl(email)),
-      );
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      }
-      return null;
-    } catch (e) {
-      print('Error getting user by email: $e');
-      return null;
-    }
+  
+  // ========== Chat Methods ==========
+  
+  Future<List<dynamic>> getMessages({
+    required String authorId,
+    required String receiverId,
+  }) async {
+    final response = await _post(ApiConfig.getMessages, body: {
+      'author_id': authorId,
+      'receiver_id': receiverId,
+    });
+    return jsonDecode(response.body);
   }
-
+  
+  Future<List<dynamic>> getChats(String userId) async {
+    final response = await _post(ApiConfig.getChats, body: {'user_id': userId});
+    return jsonDecode(response.body);
+  }
+  
+  Future<void> markMessagesRead({
+    required String authorId,
+    required String receiverId,
+  }) async {
+    await _post(ApiConfig.markRead, body: {
+      'author_id': authorId,
+      'receiver_id': receiverId,
+    });
+  }
+  
+  // ========== Item Methods ==========
+  
+  Future<List<dynamic>> getLostItems() async {
+    final response = await _get(ApiConfig.lostItems);
+    return jsonDecode(response.body);
+  }
+  
+  Future<List<dynamic>> searchLostItems(String query) async {
+    final response = await _get('${ApiConfig.searchLostItems}?q=$query');
+    return jsonDecode(response.body);
+  }
+  
+  Future<List<dynamic>> getActivityFeed() async {
+    final response = await _get(ApiConfig.activityFeed);
+    return jsonDecode(response.body);
+  }
 }
