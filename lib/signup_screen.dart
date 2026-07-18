@@ -4,7 +4,6 @@ import 'package:khuje_nao/login_screen.dart';
 import 'activity_feed.dart';
 import 'api_service.dart';
 import 'localization.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:khuje_nao/profile_completion_screen.dart';
 
@@ -102,25 +101,20 @@ class SignupScreenState extends State<SignupScreen> {
         return;
       }
 
-      // User doesn't exist - proceed with Firebase authentication and profile completion
+      // User doesn't exist - proceed with backend authentication
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      final idToken = await userCredential.user?.getIdToken();
-      if (idToken == null) {
+      final accessToken = googleAuth.accessToken;
+      if (accessToken == null) {
         setState(() {
           is_loading = false;
         });
-        showResponseDialog("Google sign-in failed: No ID token.");
+        showResponseDialog("Google sign-in failed: No access token.");
         return;
       }
 
       // Verify with backend (this will create a placeholder profile)
-      final response = await api_service.firebaseGoogleLogin(idToken);
-      if (!response) {
+      final response = await api_service.firebaseGoogleLogin(accessToken);
+      if (response == null || response['session'] == null) {
         setState(() {
           is_loading = false;
         });
@@ -135,10 +129,10 @@ class SignupScreenState extends State<SignupScreen> {
         is_loading = false;
       });
 
-      // Navigate to profile completion screen
+      // Navigate to profile completion screen with email
       final result = await Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => ProfileCompletionScreen(idToken: idToken)),
+        MaterialPageRoute(builder: (context) => ProfileCompletionScreen(email: email)),
       );
       
       if (result == true && mounted) {

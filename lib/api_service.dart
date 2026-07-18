@@ -164,6 +164,27 @@ class ApiService {
     return data['exists'] ?? false;
   }
   
+  Future<Map<String, dynamic>?> getProfile(String email) async {
+    final response = await _get('${ApiConfig.profile}/$email');
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    return null;
+  }
+  
+  Future<bool> completeProfile({
+    required String name,
+    required int nsuId,
+    required String phone,
+  }) async {
+    final response = await _post(ApiConfig.profile, body: {
+      'name': name,
+      'nsu_id': nsuId,
+      'phone_number': phone,
+    });
+    return response.statusCode == 200;
+  }
+  
   // ========== Chat Methods ==========
   
   Future<List<dynamic>> getMessages({

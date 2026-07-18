@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'api_service.dart';
 import 'localization.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,9 +6,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// Screen to complete user profile after Google Sign-In.
 /// Collects NSU ID and phone number which are not provided by Google.
 class ProfileCompletionScreen extends StatefulWidget {
-  final String idToken;
+  final String email;
   
-  const ProfileCompletionScreen({super.key, required this.idToken});
+  const ProfileCompletionScreen({super.key, required this.email});
 
   @override
   State<ProfileCompletionScreen> createState() => _ProfileCompletionScreenState();
@@ -43,16 +42,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
   }
 
   Future<void> _prefillData() async {
-    // Prefill name from Firebase user if available
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null && user.displayName != null && _nameCtrl.text.isEmpty) {
-      setState(() {
-        _nameCtrl.text = user.displayName!;
-      });
-    }
-    
     // Try to get existing profile data
-    final profile = await _api.getProfile(widget.idToken);
+    final profile = await _api.getProfile(widget.email);
     if (profile != null) {
       if (profile['name'] != null) _nameCtrl.text = profile['name'];
       if (profile['nsu_id'] != null) _nsuCtrl.text = profile['nsu_id'].toString();
@@ -108,12 +99,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
     });
 
     try {
-      // Refresh token in case it expired
-      final user = FirebaseAuth.instance.currentUser;
-      final token = await user?.getIdToken() ?? widget.idToken;
-      
-      final saved = await _api.completeProfileWithToken(
-        token: token,
+      final saved = await _api.completeProfile(
         name: name,
         nsuId: nsu,
         phone: phone,
@@ -141,9 +127,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final email = user?.email ?? '';
-
     return Scaffold(
       appBar: AppBar(
         title: Text(AppLocalization.getString(_language, "complete_profile")),
@@ -166,7 +149,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        email,
+                        widget.email,
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
