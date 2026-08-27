@@ -97,9 +97,7 @@ class MessageModel:
         sb.table('messages').update({
             'is_read': True,
             'read_at': datetime.utcnow().isoformat()
-        }).and_(
-            f'author_id.eq.{author_id},receiver_id.eq.{receiver_id},is_read.eq.false'
-        ).execute()
+        }).eq('author_id', author_id).eq('receiver_id', receiver_id).eq('is_read', False).execute()
     
     @staticmethod
     def get_unread_count(user_id):

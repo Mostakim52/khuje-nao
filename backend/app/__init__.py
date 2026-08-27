@@ -56,3 +56,5 @@ def create_app():
 def get_supabase():
     """Get the global Supabase client."""
     return supabase
+
+# For gunicorn: import from wsgi.py instead

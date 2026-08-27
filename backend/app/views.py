@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app import socketio
+from app import socketio, get_supabase
 from app.models import UserModel, LostItemModel, FoundItemModel, MessageModel
 from app.storage import upload_image_to_storage
 from flask_socketio import emit, join_room
@@ -25,17 +25,19 @@ def create_user():
 # ========== Lost Item Endpoints ==========
 @main_bp.route('/lost-items', methods=['POST'])
 def report_lost_item():
-    data = request.get_json()
-    
-    # Handle image upload if present
-    if 'image' in request.files:
-        image = request.files['image']
-        image_url = upload_image_to_storage(
-            image.read(),
-            image.filename,
-            'lost-items'
-        )
-        data['image_path'] = image_url
+    # Handle both JSON and multipart form data
+    if request.content_type and 'multipart' in request.content_type:
+        data = request.form.to_dict()
+        if 'image' in request.files:
+            image = request.files['image']
+            image_url = upload_image_to_storage(
+                image.read(),
+                image.filename,
+                'lost-items'
+            )
+            data['image_path'] = image_url
+    else:
+        data = request.get_json() or {}
     
     data['is_found'] = False
     data['is_approved'] = False
@@ -125,6 +127,48 @@ def search_lost_items():
 def activity_feed():
     items = LostItemModel.get_approved()
     return jsonify(items[:20]), 200
+
+# ========== Notification Endpoints ==========
+@main_bp.route('/notifications', methods=['GET'])
+def get_notifications():
+    sb = get_supabase()
+    result = sb.table('notifications').select('*').order('created_at', desc=True).execute()
+    return jsonify(result.data), 200
+
+@main_bp.route('/notifications', methods=['POST'])
+def create_notification():
+    data = request.get_json()
+    title = data.get('title')
+    message = data.get('message')
+    
+    if not title or not message:
+        return jsonify({'error': 'Title and message required'}), 400
+    
+    sb = get_supabase()
+    result = sb.table('notifications').insert({
+        'title': title,
+        'message': message,
+        'created_by': 'admin'
+    }).execute()
+    
+    notif = result.data[0] if result.data else {}
+    
+    # Emit to all connected clients via SocketIO
+    socketio.emit('new_notification', notif)
+    
+    return jsonify(notif), 201
+
+@main_bp.route('/notifications/unread-count', methods=['GET'])
+def unread_count():
+    sb = get_supabase()
+    result = sb.table('notifications').select('*', count='exact').eq('is_read', False).execute()
+    return jsonify({'count': result.count or 0}), 200
+
+@main_bp.route('/notifications/mark-read', methods=['POST'])
+def mark_notifications_read():
+    sb = get_supabase()
+    sb.table('notifications').update({'is_read': True}).eq('is_read', False).execute()
+    return jsonify({'message': 'Notifications marked as read'}), 200
 
 # ========== Chat Endpoints (HTTP) ==========
 @main_bp.route('/send_message', methods=['POST'])

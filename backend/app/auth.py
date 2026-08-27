@@ -55,6 +55,8 @@ def signup():
     email = data.get('email')
     password = data.get('password')
     name = data.get('name', '')
+    nsu_id = data.get('nsu_id', '')
+    phone = data.get('phone', '')
     
     if not email or not password:
         return jsonify({'error': 'Email and password required'}), 400
@@ -79,7 +81,9 @@ def signup():
             'email': email,
             'password_hash': hash_password(password),
             'supabase_auth_id': result.user.id,
-            'profile_complete': False
+            'nsu_id': nsu_id,
+            'phone_number': phone,
+            'profile_complete': True
         }).execute()
         
         return jsonify({
@@ -92,6 +96,25 @@ def signup():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+ADMIN_EMAIL = 'admin'
+ADMIN_PASSWORD = 'admin123'
+
+@auth_bp.route('/admin-login', methods=['POST'])
+def admin_login():
+    """Login with hardcoded admin credentials."""
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    
+    if email == ADMIN_EMAIL and password == ADMIN_PASSWORD:
+        return jsonify({
+            'message': 'Admin login successful',
+            'user': {'email': ADMIN_EMAIL, 'name': 'Admin', 'is_admin': True},
+            'session': {'access_token': 'admin-token', 'refresh_token': ''}
+        }), 200
+    
+    return jsonify({'error': 'Invalid admin credentials'}), 401
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
