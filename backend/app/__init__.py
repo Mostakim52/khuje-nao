@@ -8,7 +8,7 @@ from config import Config
 supabase: Client = None
 
 # Global SocketIO instance
-socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(cors_allowed_origins="*", async_mode='threading')
 
 def create_app():
     global supabase
