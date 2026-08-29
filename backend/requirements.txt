@@ -7,3 +7,4 @@ werkzeug
 gunicorn
 supabase
 PyJWT
+requests
