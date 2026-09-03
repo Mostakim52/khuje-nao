@@ -39,6 +39,14 @@ def report_lost_item():
     else:
         data = request.get_json() or {}
     
+    # Validate required fields
+    if not data.get('reported_by'):
+        return jsonify({'error': 'reported_by field is required'}), 400
+    if not data.get('description'):
+        return jsonify({'error': 'description field is required'}), 400
+    if not data.get('location'):
+        return jsonify({'error': 'location field is required'}), 400
+    
     data['is_found'] = False
     data['is_approved'] = False
     data['created_at'] = datetime.utcnow().isoformat()

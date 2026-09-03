@@ -8,3 +8,4 @@ gunicorn
 supabase
 PyJWT
 requests
+requests
